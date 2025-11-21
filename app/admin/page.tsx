@@ -5,7 +5,7 @@ import { supabase, type RecognitionRecord } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Calendar, ArrowLeft } from "lucide-react";
+import { Search, Calendar, ArrowLeft, X } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { format } from "date-fns";
@@ -18,6 +18,10 @@ export default function AdminPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(true);
+  const [previewImage, setPreviewImage] = useState<{
+    url: string;
+    title: string;
+  } | null>(null);
 
   useEffect(() => {
     loadRecords();
@@ -72,6 +76,12 @@ export default function AdminPage() {
     setSearchQuery("");
     setDateFilter("");
   };
+
+  const openPreview = (url: string, title: string) => {
+    setPreviewImage({ url, title });
+  };
+
+  const closePreview = () => setPreviewImage(null);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -149,30 +159,51 @@ export default function AdminPage() {
                     {/* 物品照片 */}
                     <div>
                       <p className="text-sm text-gray-600 mb-2">物品照片</p>
-                      <div className="relative aspect-video bg-gray-100 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openPreview(
+                            record.item_image_url,
+                            `${record.recognition_result} - 物品照片`
+                          )
+                        }
+                        className="group relative aspect-video w-full bg-gray-100 rounded-lg overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
                         <Image
                           src={record.item_image_url}
                           alt={record.recognition_result}
                           fill
-                          className="object-cover"
+                          className="object-cover transition-transform duration-200 group-hover:scale-105"
                           unoptimized
                         />
-                      </div>
+                        <span className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-sm">
+                          点击放大
+                        </span>
+                      </button>
                     </div>
 
                     {/* 人脸照片 */}
                     <div>
                       <p className="text-sm text-gray-600 mb-2">人脸照片</p>
                       {record.face_image_url ? (
-                        <div className="relative aspect-video bg-gray-100 rounded-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openPreview(record.face_image_url, "人脸照片")
+                          }
+                          className="group relative aspect-video w-full bg-gray-100 rounded-lg overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        >
                           <Image
                             src={record.face_image_url}
                             alt="人脸"
                             fill
-                            className="object-cover"
+                            className="object-cover transition-transform duration-200 group-hover:scale-105"
                             unoptimized
                           />
-                        </div>
+                          <span className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-sm">
+                            点击放大
+                          </span>
+                        </button>
                       ) : (
                         <div className="aspect-video bg-gray-100 rounded-lg flex items-center justify-center">
                           <p className="text-gray-400 text-sm">未拍摄</p>
@@ -186,6 +217,38 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={closePreview}
+        >
+          <div
+            className="relative w-full max-w-3xl bg-black rounded-2xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <p className="text-white text-sm">{previewImage.title}</p>
+              <button
+                type="button"
+                onClick={closePreview}
+                className="text-white/80 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="relative w-full h-[60vh] min-h-[300px]">
+              <Image
+                src={previewImage.url}
+                alt={previewImage.title}
+                fill
+                className="object-contain bg-black"
+                unoptimized
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
