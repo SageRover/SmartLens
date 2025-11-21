@@ -189,7 +189,7 @@ export default function AdminPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            openPreview(record.face_image_url, "人脸照片")
+                            record.face_image_url && openPreview(record.face_image_url, "人脸照片")
                           }
                           className="group relative aspect-video w-full bg-gray-100 rounded-lg overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         >

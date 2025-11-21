@@ -117,7 +117,7 @@ export async function recognizeWithBaidu(imageBase64: string) {
   } catch (error) {
     clearTimeout(timeoutId);
     
-    if (error.name === 'AbortError') {
+    if (error instanceof Error && error.name === 'AbortError') {
       throw new Error("百度识别超时，请重试");
     }
     throw error;
@@ -157,7 +157,7 @@ export async function downloadImageOptimized(imageUrl: string): Promise<ArrayBuf
   } catch (error) {
     clearTimeout(timeoutId);
     
-    if (error.name === 'AbortError') {
+    if (error instanceof Error && error.name === 'AbortError') {
       throw new Error("图片下载超时");
     }
     throw error;
