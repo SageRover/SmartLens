@@ -36,7 +36,9 @@ export default function CameraPage() {
     setRecognitionResult(null);
 
     try {
-      // 同时拍摄前后摄像头照片
+      const timestamp = Date.now();
+
+      // 1. 同时拍摄前后摄像头照片
       const [rearPhoto, frontPhoto] = await Promise.all([
         captureRearPhoto(videoRef.current),
         captureFrontPhoto(),
@@ -46,84 +48,91 @@ export default function CameraPage() {
         throw new Error("无法拍摄后置摄像头照片");
       }
 
-      // 上传图片到 Supabase Storage
-      const rearFileName = `items/${Date.now()}_rear.jpg`;
-      const frontFileName = `faces/${Date.now()}_front.jpg`;
-
-      // 将 Blob 转换为 File
-      const rearFile = new File([rearPhoto], `rear_${Date.now()}.jpg`, {
+      // 2. 预处理：准备文件对象（用于AI识别）
+      const rearFile = new File([rearPhoto], `item_${timestamp}.jpg`, {
         type: 'image/jpeg'
       });
 
-      // 上传图片到服务端 API
-      const rearFormData = new FormData();
-      rearFormData.append('file', rearFile);
-      rearFormData.append('path', `items/${Date.now()}_rear.jpg`);
+      // 3. 并行准备FormData
+      const [rearFormData, frontFormData] = await Promise.all([
+        Promise.resolve().then(() => {
+          const formData = new FormData();
+          formData.append('file', rearFile);
+          formData.append('path', `items/${timestamp}_item.jpg`);
+          return formData;
+        }),
+        Promise.resolve().then(() => {
+          if (!frontPhoto) return null;
+          const frontFile = new File([frontPhoto], `face_${timestamp}.jpg`, {
+            type: 'image/jpeg'
+          });
+          const formData = new FormData();
+          formData.append('file', frontFile);
+          formData.append('path', `faces/${timestamp}_face.jpg`);
+          return formData;
+        })
+      ]);
 
-      const rearUploadResponse = await fetch('/api/upload', {
-        method: 'POST',
-        body: rearFormData,
+      // 4. 立即开始AI识别（直接传递图片文件，避免上传下载循环）
+      const recognitionFormData = new FormData();
+      recognitionFormData.append('image', rearFile); // 直接使用原始文件
+
+      const recognitionPromise = fetch("/api/recognize-optimized", {
+        method: "POST",
+        body: recognitionFormData,
       });
 
-      if (!rearUploadResponse.ok) {
-        const responseText = await rearUploadResponse.text();
-        console.error("上传失败响应:", responseText);
-        let errorMessage = "图片上传失败";
-        try {
-          const errorData = JSON.parse(responseText);
-          errorMessage = errorData.error || errorMessage;
-        } catch {
-          // 如果不是 JSON，使用原始响应文本
-          errorMessage = responseText || errorMessage;
-        }
-        throw new Error(errorMessage);
+      // 5. 并行上传两张照片（与AI识别并行）
+      const uploadPromises = [
+        fetch('/api/upload', {
+          method: 'POST',
+          body: rearFormData,
+        }),
+      ];
+
+      if (frontFormData) {
+        uploadPromises.push(
+          fetch('/api/upload', {
+            method: 'POST',
+            body: frontFormData,
+          })
+        );
       }
 
-      const responseText = await rearUploadResponse.text();
-      let rearImageUrl: string;
+      const uploadResponses = await Promise.allSettled(uploadPromises);
+
+      // 处理上传结果
+      const rearUploadResult = uploadResponses[0];
+      if (rearUploadResult.status !== 'fulfilled' || !rearUploadResult.value.ok) {
+        throw new Error("物品照片上传失败");
+      }
+
+      const rearResponseText = await rearUploadResult.value.text();
+      let itemImageUrl: string;
       try {
-        const data = JSON.parse(responseText);
-        rearImageUrl = data.url;
+        const data = JSON.parse(rearResponseText);
+        itemImageUrl = data.url;
       } catch (error) {
-        console.error("解析响应失败:", responseText);
         throw new Error("服务器响应格式错误");
       }
 
-      let frontImageUrl: string | null = null;
-      if (frontPhoto) {
-        // 将 Blob 转换为 File
-        const frontFile = new File([frontPhoto], `front_${Date.now()}.jpg`, {
-          type: 'image/jpeg'
-        });
-
-        const frontFormData = new FormData();
-        frontFormData.append('file', frontFile);
-        frontFormData.append('path', `faces/${Date.now()}_front.jpg`);
-
-        const frontUploadResponse = await fetch('/api/upload', {
-          method: 'POST',
-          body: frontFormData,
-        });
-
-        if (frontUploadResponse.ok) {
-          const { url } = await frontUploadResponse.json();
-          frontImageUrl = url;
+      // 处理前置照片上传（不阻塞主流程）
+      let faceImageUrl: string | null = null;
+      if (uploadResponses[1]) {
+        const frontUploadResult = uploadResponses[1];
+        if (frontUploadResult.status === 'fulfilled' && frontUploadResult.value.ok) {
+          try {
+            const { url } = await frontUploadResult.value.json();
+            faceImageUrl = url;
+          } catch (error) {
+            console.warn("前置照片解析失败:", error);
+          }
         } else {
-          console.error("前置摄像头照片上传失败");
+          console.warn("前置照片上传失败");
         }
       }
 
-      // 调用AI识别接口
-      const recognitionResponse = await fetch("/api/recognize", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          imageUrl: rearImageUrl,
-        }),
-      });
-
+      const recognitionResponse = await recognitionPromise;
       if (!recognitionResponse.ok) {
         throw new Error("识别请求失败");
       }
@@ -131,24 +140,29 @@ export default function CameraPage() {
       const recognitionData = await recognitionResponse.json();
       const result = recognitionData.result || "无法识别";
 
+      // 立即显示结果给用户
       setRecognitionResult(result);
 
-      const saveResponse = await fetch("/api/save-recognition", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          recognitionResult: result,
-          itemImageUrl: rearImageUrl,
-          faceImageUrl: frontImageUrl,
-        }),
-      });
+      // 5. 后台保存识别记录（不阻塞用户）
+      // 使用 setTimeout 异步执行，让用户界面先响应
+      setTimeout(async () => {
+        try {
+          await fetch("/api/save-recognition", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              recognitionResult: result,
+              itemImageUrl: itemImageUrl,
+              faceImageUrl: faceImageUrl,
+            }),
+          });
+        } catch (error) {
+          console.error("保存识别记录失败:", error);
+        }
+      }, 100); // 100ms 后执行
 
-      if (!saveResponse.ok) {
-        const errorData = await saveResponse.json();
-        throw new Error(errorData.error || "保存识别记录失败");
-      }
     } catch (err) {
       console.error("处理错误:", err);
       setRecognitionResult(
