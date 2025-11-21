@@ -1,6 +1,16 @@
 {
-  "framework": "nextjs",
   "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_PUBLIC_SUPABASE_URL": "@supabase-url",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase-anon-key",
+    "SUPABASE_SERVICE_ROLE_KEY": "@supabase-service-role-key",
+    "BAIDU_AIP_AK": "@baidu-aip-ak",
+    "BAIDU_AIP_SK": "@baidu-aip-sk"
+  },
   "functions": {
     "app/api/*.ts": {
       "maxDuration": 30
