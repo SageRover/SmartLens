@@ -1,0 +1,22 @@
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn(
+    "Supabase credentials are missing. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your .env.local file."
+  );
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// 数据库类型定义
+export interface RecognitionRecord {
+  id: string;
+  created_at: string;
+  recognition_result: string;
+  item_image_url: string;
+  face_image_url: string | null;
+}
+
