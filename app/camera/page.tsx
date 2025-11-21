@@ -25,7 +25,14 @@ export default function CameraPage() {
 
   useEffect(() => {
     if (rearStream && videoRef.current) {
-      videoRef.current.srcObject = rearStream;
+      const video = videoRef.current;
+      video.srcObject = rearStream;
+      const playPromise = video.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch((err) => {
+          console.warn("视频播放被阻止，等待用户交互后重试:", err);
+        });
+      }
     }
   }, [rearStream]);
 
@@ -174,7 +181,10 @@ export default function CameraPage() {
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col">
+    <div
+      className="bg-black flex flex-col overflow-hidden"
+      style={{ minHeight: "100vh", height: "100dvh" }}
+    >
       {/* 顶部导航 */}
       <div className="flex items-center justify-between p-4 bg-black/50 backdrop-blur-sm z-10">
         <Link href="/">
@@ -200,8 +210,16 @@ export default function CameraPage() {
             ref={videoRef}
             autoPlay
             playsInline
+            muted
+            onLoadedMetadata={() => {
+              const video = videoRef.current;
+              if (video) {
+                video.play().catch((err) => {
+                  console.warn("元数据加载后视频播放失败:", err);
+                });
+              }
+            }}
             className="w-full h-full object-cover"
-            style={{ transform: "scaleX(-1)" }} // 镜像翻转，更符合用户习惯
           />
         )}
 
