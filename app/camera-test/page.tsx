@@ -22,6 +22,10 @@ export default function CameraTestPage() {
   const rearVideoRef = useRef<HTMLVideoElement>(null);
 
   const testCamera = async (facingMode: "user" | "environment"): Promise<boolean> => {
+    if (typeof window === 'undefined' || !navigator.mediaDevices) {
+      return false;
+    }
+
     try {
       const constraints: MediaStreamConstraints = {
         video: {
@@ -71,6 +75,10 @@ export default function CameraTestPage() {
   };
 
   const startDualCamera = async () => {
+    if (typeof window === 'undefined' || !navigator.mediaDevices) {
+      return;
+    }
+
     try {
       // 同时获取两个摄像头
       const [frontStream, rearStream] = await Promise.all([
@@ -264,21 +272,21 @@ export default function CameraTestPage() {
               <div className="flex justify-between">
                 <span className="text-gray-400">用户代理:</span>
                 <span className="font-mono text-xs break-all ml-2">
-                  {navigator.userAgent.slice(0, 50)}...
+                  {typeof window !== 'undefined' ? navigator.userAgent.slice(0, 50) + '...' : '加载中...'}
                 </span>
               </div>
               
               <div className="flex justify-between">
                 <span className="text-gray-400">HTTPS:</span>
-                <span className={location.protocol === 'https:' ? 'text-green-400' : 'text-red-400'}>
-                  {location.protocol === 'https:' ? '✅ 安全' : '❌ 不安全'}
+                <span className={typeof window !== 'undefined' && window.location?.protocol === 'https:' ? 'text-green-400' : 'text-red-400'}>
+                  {typeof window !== 'undefined' && window.location?.protocol === 'https:' ? '✅ 安全' : '❌ 不安全'}
                 </span>
               </div>
               
               <div className="flex justify-between">
                 <span className="text-gray-400">移动设备:</span>
                 <span className="text-blue-400">
-                  {/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? '是' : '否'}
+                  {typeof window !== 'undefined' && /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? '是' : '否'}
                 </span>
               </div>
             </div>
