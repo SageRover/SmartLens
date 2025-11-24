@@ -21,7 +21,8 @@ async function uploadWithRetry(
     }
 
     // 如果是最后一次尝试或错误不可重试，直接返回
-    if (attempt === retries || (error as any).statusCode && (error as any).statusCode < 500) {
+    const statusCode = (error as any).statusCode;
+    if (attempt === retries || (statusCode && statusCode < 500)) {
       return { data: null, error };
     }
 
