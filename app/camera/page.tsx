@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useCamera } from "@/hooks/useCamera";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { MobileCameraFix } from "@/components/mobile-camera-fix";
 import { Camera, Loader2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
@@ -11,7 +12,9 @@ import { supabase } from "@/lib/supabase";
 export default function CameraPage() {
   const {
     rearStream,
+    frontStream,
     isRearReady,
+    isFrontReady,
     error,
     captureRearPhoto,
     captureFrontPhoto,
@@ -21,6 +24,7 @@ export default function CameraPage() {
   const [recognitionResult, setRecognitionResult] = useState<string | null>(
     null
   );
+  const [showCameraFix, setShowCameraFix] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -36,8 +40,28 @@ export default function CameraPage() {
     }
   }, [rearStream]);
 
+  // 🔧 移动端摄像头诊断
+  useEffect(() => {
+    // 检测移动端且前置摄像头未准备好的情况
+    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (isMobile && !isFrontReady && !error) {
+      // 延迟显示修复提示
+      const timer = setTimeout(() => {
+        setShowCameraFix(true);
+      }, 5000); // 5秒后显示
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isFrontReady, error]);
+
   const handleCapture = async () => {
     if (!isRearReady || isProcessing) return;
+    
+    // 🔧 移动端额外检查
+    if (!isFrontReady) {
+      console.warn("⚠️ 前置摄像头未准备好，尝试继续...");
+    }
 
     setIsProcessing(true);
     setRecognitionResult(null);
@@ -295,6 +319,16 @@ export default function CameraPage() {
           </p>
         </div>
       </div>
+      
+      {/* 移动端摄像头修复弹窗 */}
+      {showCameraFix && (
+        <MobileCameraFix 
+          onFixed={() => {
+            setShowCameraFix(false);
+            window.location.reload(); // 重新加载页面
+          }} 
+        />
+      )}
     </div>
   );
 }

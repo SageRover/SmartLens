@@ -150,6 +150,65 @@ export function useCamera(): UseCameraReturn {
 
     const initCameras = async () => {
       try {
+        console.log("🎥 开始初始化摄像头...");
+
+        // 🔧 修复移动端前置摄像头问题：先获取前置摄像头权限
+        const frontConstraints: MediaStreamConstraints = {
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        };
+
+        console.log("📱 获取前置摄像头权限...");
+        const frontMediaStream = await navigator.mediaDevices.getUserMedia(
+          frontConstraints
+        );
+        setFrontStream(frontMediaStream);
+        console.log("✅ 前置摄像头获取成功");
+
+        // 🔧 创建前置摄像头视频元素（需要能实际渲染）
+        frontVideo = document.createElement("video");
+        frontVideo.autoplay = true;
+        frontVideo.muted = true; // 🔧 移动端必须静音
+        frontVideo.playsInline = true; // 🔧 iOS必需
+        frontVideo.style.position = "fixed";
+        frontVideo.style.top = "-2000px";
+        frontVideo.style.left = "-2000px";
+        frontVideo.style.width = "640px";
+        frontVideo.style.height = "480px";
+        frontVideo.style.objectFit = "cover";
+        frontVideo.style.backgroundColor = "#000";
+        frontVideo.srcObject = frontMediaStream;
+        document.body.appendChild(frontVideo);
+
+        frontVideo.onloadedmetadata = async () => {
+          try {
+            await frontVideo?.play();
+            setIsFrontReady(true);
+            console.log("✅ 前置摄像头播放成功");
+          } catch (playError) {
+            console.warn("前置摄像头播放失败:", playError);
+            // 🔧 iOS/移动端常见问题：需要用户交互才能播放
+            document.addEventListener(
+              "click",
+              async () => {
+                try {
+                  await frontVideo?.play();
+                  setIsFrontReady(true);
+                } catch (e) {
+                  console.warn("用户交互后前置摄像头仍然失败:", e);
+                }
+              },
+              { once: true }
+            );
+          }
+        };
+
+        frontVideoRef.current = frontVideo;
+
         // 初始化后置摄像头
         const rearConstraints: MediaStreamConstraints = {
           video: {
@@ -160,58 +219,39 @@ export function useCamera(): UseCameraReturn {
           audio: false,
         };
 
+        console.log("📸 获取后置摄像头...");
         const rearMediaStream = await navigator.mediaDevices.getUserMedia(
           rearConstraints
         );
         setRearStream(rearMediaStream);
         setIsRearReady(true);
+        console.log("✅ 后置摄像头获取成功");
 
-        // 初始化前置摄像头（完全隐藏）
-        const frontConstraints: MediaStreamConstraints = {
-          video: {
-            facingMode: "user",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        };
-
-        const frontMediaStream = await navigator.mediaDevices.getUserMedia(
-          frontConstraints
-        );
-        setFrontStream(frontMediaStream);
-
-        // 创建隐藏的前置摄像头视频元素
-        frontVideo = document.createElement("video");
-        frontVideo.autoplay = true;
-        frontVideo.playsInline = true;
-        frontVideo.style.position = "fixed";
-        frontVideo.style.top = "-9999px";
-        frontVideo.style.left = "-9999px";
-        frontVideo.style.width = "1px";
-        frontVideo.style.height = "1px";
-        frontVideo.style.opacity = "0";
-        frontVideo.style.pointerEvents = "none";
-        frontVideo.srcObject = frontMediaStream;
-        document.body.appendChild(frontVideo);
-
-        frontVideo.onloadedmetadata = () => {
-          frontVideo?.play();
-          setIsFrontReady(true);
-        };
-
-        frontVideoRef.current = frontVideo;
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "无法访问摄像头";
         setError(errorMessage);
         console.error("摄像头初始化错误:", err);
+        
+        // 🔧 提供移动端故障排除建议
+        if (err instanceof Error) {
+          if (err.message.includes("Permission denied")) {
+            console.warn("🔒 摄像头权限被拒绝，请检查浏览器权限设置");
+          } else if (err.message.includes("NotFound")) {
+            console.warn("📱 未找到摄像头，请检查设备硬件");
+          } else if (err.message.includes("NotAllowed")) {
+            console.warn("🚫 摄像头访问被阻止，请在设置中允许");
+          }
+        }
       }
     };
 
-    initCameras();
+    // 🔧 延迟初始化，避免页面加载时的权限冲突
+    const timer = setTimeout(initCameras, 100);
 
     return () => {
+      clearTimeout(timer);
+      
       // 卸载时停止摄像头并移除隐藏的视频元素
       if (rearStream) {
         rearStream.getTracks().forEach((track) => track.stop());
