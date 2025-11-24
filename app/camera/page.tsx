@@ -43,19 +43,25 @@ export default function CameraPage() {
     setRecognitionResult(null);
 
     try {
+      const totalStartTime = performance.now();
       const timestamp = Date.now();
 
+      console.log("📸 开始拍照识别流程...");
+
       // 1. 同时拍摄前后摄像头照片
+      const captureStartTime = performance.now();
       const [rearPhoto, frontPhoto] = await Promise.all([
         captureRearPhoto(videoRef.current),
         captureFrontPhoto(),
       ]);
+      console.log(`📷 拍照完成，耗时: ${(performance.now() - captureStartTime).toFixed(0)}ms`);
 
       if (!rearPhoto) {
         throw new Error("无法拍摄后置摄像头照片");
       }
 
       // 2. 预处理：准备文件对象（用于AI识别）
+      const prepareStartTime = performance.now();
       const rearFile = new File([rearPhoto], `item_${timestamp}.jpg`, {
         type: 'image/jpeg'
       });
@@ -79,67 +85,27 @@ export default function CameraPage() {
           return formData;
         })
       ]);
+      console.log(`📦 文件准备完成，耗时: ${(performance.now() - prepareStartTime).toFixed(0)}ms`);
 
       // 4. 立即开始AI识别（直接传递图片文件，避免上传下载循环）
       const recognitionFormData = new FormData();
       recognitionFormData.append('image', rearFile); // 直接使用原始文件
 
+      const recognitionStartTime = performance.now();
       const recognitionPromise = fetch("/api/recognize-optimized", {
         method: "POST",
         body: recognitionFormData,
+      }).then(async (res) => {
+        const recognitionTime = performance.now() - recognitionStartTime;
+        console.log(`🤖 识别请求完成，耗时: ${recognitionTime.toFixed(0)}ms`);
+        return res;
       });
 
-      // 5. 并行上传两张照片（与AI识别并行）
-      const uploadPromises = [
-        fetch('/api/upload', {
-          method: 'POST',
-          body: rearFormData,
-        }),
-      ];
-
-      if (frontFormData) {
-        uploadPromises.push(
-          fetch('/api/upload', {
-            method: 'POST',
-            body: frontFormData,
-          })
-        );
-      }
-
-      const uploadResponses = await Promise.allSettled(uploadPromises);
-
-      // 处理上传结果
-      const rearUploadResult = uploadResponses[0];
-      if (rearUploadResult.status !== 'fulfilled' || !rearUploadResult.value.ok) {
-        throw new Error("物品照片上传失败");
-      }
-
-      const rearResponseText = await rearUploadResult.value.text();
-      let itemImageUrl: string;
-      try {
-        const data = JSON.parse(rearResponseText);
-        itemImageUrl = data.url;
-      } catch (error) {
-        throw new Error("服务器响应格式错误");
-      }
-
-      // 处理前置照片上传（不阻塞主流程）
-      let faceImageUrl: string | null = null;
-      if (uploadResponses[1]) {
-        const frontUploadResult = uploadResponses[1];
-        if (frontUploadResult.status === 'fulfilled' && frontUploadResult.value.ok) {
-          try {
-            const { url } = await frontUploadResult.value.json();
-            faceImageUrl = url;
-          } catch (error) {
-            console.warn("前置照片解析失败:", error);
-          }
-        } else {
-          console.warn("前置照片上传失败");
-        }
-      }
-
+      // 5. 🚀 优化：识别结果立即显示，上传完全异步
+      // 只等待识别结果，上传在后台进行
       const recognitionResponse = await recognitionPromise;
+
+      // 处理识别结果（立即显示给用户）
       if (!recognitionResponse.ok) {
         throw new Error("识别请求失败");
       }
@@ -147,13 +113,72 @@ export default function CameraPage() {
       const recognitionData = await recognitionResponse.json();
       const result = recognitionData.result || "无法识别";
 
-      // 立即显示结果给用户
+      // 🚀 立即显示结果给用户（不等待任何上传）
       setRecognitionResult(result);
+      const totalTime = performance.now() - totalStartTime;
+      console.log(`✅ 用户可见结果已显示，总耗时: ${totalTime.toFixed(0)}ms`);
 
-      // 5. 后台保存识别记录（不阻塞用户）
-      // 使用 setTimeout 异步执行，让用户界面先响应
-      setTimeout(async () => {
+      // 🚀 优化：上传和保存完全异步，不阻塞用户界面
+      // 物品照片上传（后台进行）
+      const uploadStartTime = performance.now();
+      const rearUploadPromise = fetch('/api/upload', {
+        method: 'POST',
+        body: rearFormData,
+      }).then(async (res) => {
+        const uploadTime = performance.now() - uploadStartTime;
+        console.log(`☁️ 物品照片上传完成，耗时: ${uploadTime.toFixed(0)}ms`);
+        return res;
+      }).catch(err => {
+        console.error("物品照片上传失败（不影响用户体验）:", err);
+        return null;
+      });
+
+      // 前置照片上传（完全异步，不阻塞）
+      const frontUploadPromise: Promise<Response | null> = frontFormData
+        ? fetch('/api/upload', {
+            method: 'POST',
+            body: frontFormData,
+          }).catch(err => {
+            console.warn("前置照片上传失败（不影响主流程）:", err);
+            return null;
+          })
+        : Promise.resolve(null);
+
+      // 🚀 优化：完全异步保存记录，使用 requestIdleCallback 或 setTimeout
+      // 不阻塞用户界面，即使失败也不影响用户体验
+      const saveRecord = async () => {
         try {
+          // 等待物品照片上传完成（最多等待10秒，避免无限等待）
+          const rearResponse = await Promise.race([
+            rearUploadPromise,
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 10000))
+          ]);
+          
+          if (!rearResponse || !('ok' in rearResponse) || !rearResponse.ok) {
+            console.warn("物品照片上传失败，无法保存记录");
+            return;
+          }
+
+          const rearUploadData = await rearResponse.json();
+          const itemImageUrl = rearUploadData.url;
+
+          // 等待前置照片上传完成（最多等待2秒）
+          const frontResponse = await Promise.race([
+            frontUploadPromise,
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 2000))
+          ]);
+          
+          let faceImageUrl: string | null = null;
+          if (frontResponse && typeof frontResponse === 'object' && 'ok' in frontResponse && frontResponse.ok) {
+            try {
+              const frontData = await (frontResponse as Response).json();
+              faceImageUrl = frontData.url;
+            } catch (error) {
+              // 忽略错误
+            }
+          }
+
+          const saveStartTime = performance.now();
           await fetch("/api/save-recognition", {
             method: "POST",
             headers: {
@@ -165,10 +190,18 @@ export default function CameraPage() {
               faceImageUrl: faceImageUrl,
             }),
           });
+          console.log(`💾 保存记录完成，耗时: ${(performance.now() - saveStartTime).toFixed(0)}ms`);
         } catch (error) {
-          console.error("保存识别记录失败:", error);
+          console.error("保存识别记录失败（不影响用户体验）:", error);
         }
-      }, 100); // 100ms 后执行
+      };
+
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        requestIdleCallback(saveRecord, { timeout: 5000 });
+      } else {
+        // 降级到 setTimeout
+        setTimeout(saveRecord, 100);
+      }
 
     } catch (err) {
       console.error("处理错误:", err);

@@ -5,7 +5,8 @@ import { supabase, type RecognitionRecord } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Calendar, ArrowLeft, X } from "lucide-react";
+import { Search, Calendar, ArrowLeft, X, Settings, Save } from "lucide-react";
+import { getCompressionConfig, clearConfigCache, type CompressionConfig } from "@/lib/compression-config";
 import Link from "next/link";
 import Image from "next/image";
 import { format } from "date-fns";
@@ -22,10 +23,65 @@ export default function AdminPage() {
     url: string;
     title: string;
   } | null>(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const [compressionConfig, setCompressionConfig] = useState<CompressionConfig | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+  // 临时存储质量输入值（允许删除）
+  const [qualityInputs, setQualityInputs] = useState<{
+    small: string;
+    medium: string;
+    large: string;
+  }>({ small: "", medium: "", large: "" });
 
   useEffect(() => {
     loadRecords();
+    loadConfig();
   }, []);
+
+  const loadConfig = async () => {
+    try {
+      const config = await getCompressionConfig();
+      setCompressionConfig(config);
+      // 初始化质量输入值
+      if (config) {
+        setQualityInputs({
+          small: config.small.quality.toString(),
+          medium: config.medium.quality.toString(),
+          large: config.large.quality.toString(),
+        });
+      }
+    } catch (error) {
+      console.error("加载配置失败:", error);
+    }
+  };
+
+  const saveConfig = async () => {
+    if (!compressionConfig) return;
+    
+    setSavingConfig(true);
+    try {
+      const response = await fetch("/api/compression-config", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(compressionConfig),
+      });
+
+      if (!response.ok) {
+        throw new Error("保存失败");
+      }
+
+      clearConfigCache();
+      alert("配置保存成功！");
+      setShowConfig(false);
+    } catch (error) {
+      console.error("保存配置失败:", error);
+      alert("保存失败，请重试");
+    } finally {
+      setSavingConfig(false);
+    }
+  };
 
   useEffect(() => {
     filterRecords();
@@ -122,9 +178,279 @@ export default function AdminPage() {
                 清除筛选
               </Button>
             )}
+            <Button
+              variant="outline"
+              onClick={() => setShowConfig(!showConfig)}
+              className="flex items-center gap-2"
+            >
+              <Settings className="w-4 h-4" />
+              压缩配置
+            </Button>
           </div>
         </div>
       </div>
+
+      {/* 压缩配置面板 */}
+      {showConfig && compressionConfig && (
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>图片压缩配置</span>
+                <Button
+                  onClick={saveConfig}
+                  disabled={savingConfig}
+                  className="flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  {savingConfig ? "保存中..." : "保存配置"}
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {/* 小图配置 */}
+                <div className="border rounded-lg p-4">
+                  <h3 className="font-semibold mb-4">小图配置 (阈值: &lt; {compressionConfig.small.threshold}KB)</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-sm text-gray-600">最大宽度</label>
+                      <Input
+                        type="number"
+                        value={compressionConfig.small.maxWidth}
+                        onChange={(e) =>
+                          setCompressionConfig({
+                            ...compressionConfig,
+                            small: {
+                              ...compressionConfig.small,
+                              maxWidth: parseInt(e.target.value) || 1920,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">最大高度</label>
+                      <Input
+                        type="number"
+                        value={compressionConfig.small.maxHeight}
+                        onChange={(e) =>
+                          setCompressionConfig({
+                            ...compressionConfig,
+                            small: {
+                              ...compressionConfig.small,
+                              maxHeight: parseInt(e.target.value) || 1080,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">质量 (0-1)</label>
+                      <Input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        value={compressionConfig.small.quality}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          // 允许空值，只在有效值时才更新
+                          if (value === "") {
+                            return; // 允许删除，不立即更新
+                          }
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue) && numValue >= 0 && numValue <= 1) {
+                            setCompressionConfig({
+                              ...compressionConfig,
+                              small: {
+                                ...compressionConfig.small,
+                                quality: numValue,
+                              },
+                            });
+                          }
+                        }}
+                        onBlur={(e) => {
+                          // 失去焦点时，如果值为空，恢复默认值
+                          if (e.target.value === "") {
+                            setCompressionConfig({
+                              ...compressionConfig,
+                              small: {
+                                ...compressionConfig.small,
+                                quality: 0.8,
+                              },
+                            });
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 中等图配置 */}
+                <div className="border rounded-lg p-4">
+                  <h3 className="font-semibold mb-4">
+                    中等图配置 (阈值: {compressionConfig.small.threshold}KB - {compressionConfig.medium.threshold}KB)
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-sm text-gray-600">最大宽度</label>
+                      <Input
+                        type="number"
+                        value={compressionConfig.medium.maxWidth}
+                        onChange={(e) =>
+                          setCompressionConfig({
+                            ...compressionConfig,
+                            medium: {
+                              ...compressionConfig.medium,
+                              maxWidth: parseInt(e.target.value) || 1600,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">最大高度</label>
+                      <Input
+                        type="number"
+                        value={compressionConfig.medium.maxHeight}
+                        onChange={(e) =>
+                          setCompressionConfig({
+                            ...compressionConfig,
+                            medium: {
+                              ...compressionConfig.medium,
+                              maxHeight: parseInt(e.target.value) || 900,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">质量 (0-1)</label>
+                      <Input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        value={compressionConfig.medium.quality}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          // 允许空值，只在有效值时才更新
+                          if (value === "") {
+                            return; // 允许删除，不立即更新
+                          }
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue) && numValue >= 0 && numValue <= 1) {
+                            setCompressionConfig({
+                              ...compressionConfig,
+                              medium: {
+                                ...compressionConfig.medium,
+                                quality: numValue,
+                              },
+                            });
+                          }
+                        }}
+                        onBlur={(e) => {
+                          // 失去焦点时，如果值为空，恢复默认值
+                          if (e.target.value === "") {
+                            setCompressionConfig({
+                              ...compressionConfig,
+                              medium: {
+                                ...compressionConfig.medium,
+                                quality: 0.7,
+                              },
+                            });
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 大图配置 */}
+                <div className="border rounded-lg p-4">
+                  <h3 className="font-semibold mb-4">
+                    大图配置 (阈值: &gt; {compressionConfig.medium.threshold}KB)
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-sm text-gray-600">最大宽度</label>
+                      <Input
+                        type="number"
+                        value={compressionConfig.large.maxWidth}
+                        onChange={(e) =>
+                          setCompressionConfig({
+                            ...compressionConfig,
+                            large: {
+                              ...compressionConfig.large,
+                              maxWidth: parseInt(e.target.value) || 1400,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">最大高度</label>
+                      <Input
+                        type="number"
+                        value={compressionConfig.large.maxHeight}
+                        onChange={(e) =>
+                          setCompressionConfig({
+                            ...compressionConfig,
+                            large: {
+                              ...compressionConfig.large,
+                              maxHeight: parseInt(e.target.value) || 800,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">质量 (0-1)</label>
+                      <Input
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        value={compressionConfig.large.quality}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          // 允许空值，只在有效值时才更新
+                          if (value === "") {
+                            return; // 允许删除，不立即更新
+                          }
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue) && numValue >= 0 && numValue <= 1) {
+                            setCompressionConfig({
+                              ...compressionConfig,
+                              large: {
+                                ...compressionConfig.large,
+                                quality: numValue,
+                              },
+                            });
+                          }
+                        }}
+                        onBlur={(e) => {
+                          // 失去焦点时，如果值为空，恢复默认值
+                          if (e.target.value === "") {
+                            setCompressionConfig({
+                              ...compressionConfig,
+                              large: {
+                                ...compressionConfig.large,
+                                quality: 0.65,
+                              },
+                            });
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* 记录列表 */}
       <div className="max-w-7xl mx-auto px-4 py-6">
@@ -142,7 +468,7 @@ export default function AdminPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredRecords.map((record) => (
+            {filteredRecords.map((record, index) => (
               <Card key={record.id}>
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -175,6 +501,7 @@ export default function AdminPage() {
                           fill
                           className="object-cover transition-transform duration-200 group-hover:scale-105"
                           unoptimized
+                          priority={index === 0}
                         />
                         <span className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-sm">
                           点击放大

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { compressImageInWorker } from "@/lib/image-compress-worker";
+import { getCompressionConfig, type CompressionConfig, type CompressionPreset } from "@/lib/compression-config";
 
 interface UseCameraReturn {
   rearStream: MediaStream | null;
@@ -19,8 +21,14 @@ export function useCamera(): UseCameraReturn {
   const [isRearReady, setIsRearReady] = useState(false);
   const [isFrontReady, setIsFrontReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compressionConfig, setCompressionConfig] = useState<CompressionConfig | null>(null);
 
   const frontVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // 加载压缩配置
+  useEffect(() => {
+    getCompressionConfig().then(setCompressionConfig).catch(console.error);
+  }, []);
 
   const capturePhoto = useCallback(
     async (videoElement: HTMLVideoElement | null): Promise<Blob | null> => {
@@ -38,9 +46,81 @@ export function useCamera(): UseCameraReturn {
       }
 
       ctx.drawImage(videoElement, 0, 0);
-      return new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
-      });
+      
+      // 🚀 优化：使用Web Worker在后台线程压缩图片，不阻塞主线程
+      try {
+        // 获取ImageData
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // 🚀 优化：智能压缩策略 - 根据配置和图片复杂度动态调整压缩参数
+        // 估算原始图片大小（ImageData大小）
+        const estimatedSize = imageData.width * imageData.height * 4; // RGBA = 4 bytes per pixel
+        const estimatedSizeKB = estimatedSize / 1024;
+        
+        // 使用配置或默认值
+        const config = compressionConfig || await getCompressionConfig();
+        
+        // 根据图片大小选择压缩预设
+        let preset: CompressionPreset;
+        if (estimatedSizeKB > config.large.threshold) {
+          preset = config.large;
+          console.log(`📊 检测到大图片 (${estimatedSizeKB.toFixed(0)}KB)，使用大图压缩预设`);
+        } else if (estimatedSizeKB > config.medium.threshold) {
+          preset = config.medium;
+          console.log(`📊 检测到中等图片 (${estimatedSizeKB.toFixed(0)}KB)，使用中等压缩预设`);
+        } else {
+          preset = config.small;
+          console.log(`📊 检测到小图片 (${estimatedSizeKB.toFixed(0)}KB)，使用小图压缩预设`);
+        }
+        
+        const compressStartTime = performance.now();
+        const compressedBlob = await compressImageInWorker(imageData, {
+          maxWidth: preset.maxWidth,
+          maxHeight: preset.maxHeight,
+          quality: preset.quality
+        });
+        
+        const compressTime = performance.now() - compressStartTime;
+        const finalSizeKB = compressedBlob.size / 1024;
+        console.log(`🗜️ 图片压缩完成，耗时: ${compressTime.toFixed(0)}ms，大小: ${finalSizeKB.toFixed(1)}KB`);
+        
+        // 如果压缩后仍然很大（>100KB），给出警告
+        if (finalSizeKB > 100) {
+          console.warn(`⚠️ 图片仍然较大 (${finalSizeKB.toFixed(1)}KB)，建议检查压缩参数`);
+        }
+        
+        return compressedBlob;
+      } catch (error) {
+        // 如果Worker失败，降级到主线程压缩
+        console.warn("Web Worker压缩失败，使用主线程压缩:", error);
+        
+        // 🚀 降级方案：主线程压缩（使用相同的优化参数）
+        const maxWidth = 1920;
+        const maxHeight = 1080;
+        const quality = 0.8;   // 从0.85降低到0.75
+        let { width, height } = canvas;
+        
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.floor(width * ratio);
+          height = Math.floor(height * ratio);
+          
+          const resizedCanvas = document.createElement("canvas");
+          resizedCanvas.width = width;
+          resizedCanvas.height = height;
+          const resizedCtx = resizedCanvas.getContext("2d");
+          if (resizedCtx) {
+            resizedCtx.drawImage(canvas, 0, 0, width, height);
+            return new Promise<Blob | null>((resolve) => {
+              resizedCanvas.toBlob((blob) => resolve(blob), "image/jpeg", quality);
+            });
+          }
+        }
+        
+        return new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality);
+        });
+      }
     },
     []
   );

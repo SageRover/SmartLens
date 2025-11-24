@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { recognizeWithBaidu } from "@/lib/baidu-optimized";
+import { recognizeWithBaidu, preloadBaiduToken } from "@/lib/baidu-optimized";
 import { imageCache } from "@/lib/image-cache";
+
+// 🚀 优化：在API路由初始化时预加载Token
+let isTokenPreloaded = false;
+if (!isTokenPreloaded) {
+  preloadBaiduToken().catch(console.warn);
+  isTokenPreloaded = true;
+}
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  
+  // 🚀 优化：确保Token已预加载
+  await preloadBaiduToken().catch(() => {
+    // 预加载失败不影响正常流程，会在使用时获取
+  });
 
   try {
     // 直接接收图片数据，而不是下载URL
@@ -44,10 +56,16 @@ export async function POST(request: NextRequest) {
 
     console.log(`图片编码完成，大小: ${arrayBuffer.byteLength} bytes`);
 
+    const encodeStartTime = Date.now();
     const base64 = Buffer.from(arrayBuffer).toString("base64");
+    const encodeTime = Date.now() - encodeStartTime;
+    console.log(`Base64编码完成，耗时: ${encodeTime}ms，大小: ${base64.length} bytes`);
 
     // 调用百度AI识别
+    const baiduStartTime = Date.now();
     const baiduResult = await recognizeWithBaidu(base64);
+    const baiduTime = Date.now() - baiduStartTime;
+    console.log(`百度API调用完成，耗时: ${baiduTime}ms`);
     const topResult = baiduResult.result?.[0];
 
     const keyword = topResult?.keyword ?? "无法识别";
